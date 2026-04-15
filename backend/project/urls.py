@@ -21,4 +21,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     #path('tickets/', include('tickets.urls')), 
     path('classification/', include('classification.urls')),
+    path('embeddings/', include('embeddings.urls')),
 ]

@@ -23,4 +23,5 @@ urlpatterns = [
     path('classification/', include('classification.urls')),
     path('embeddings/', include('embeddings.urls')),
     path('clustering/', include('clustering.urls')),
+    path('knowledge/', include('knowledge.urls')),
 ]

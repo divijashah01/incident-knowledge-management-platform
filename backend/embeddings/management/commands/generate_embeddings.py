@@ -7,62 +7,93 @@ from django.conf import settings
 from tickets.models import Ticket, Embedding
 from sentence_transformers import SentenceTransformer
 
+
 class Command(BaseCommand):
-    help = 'Generates vector embeddings for all tickets, saves them to DB, and builds a FAISS index.'
+    help = 'Generates vector embeddings for all tickets, saves to DB, builds FAISS index.'
 
     def handle(self, *args, **kwargs):
-        model_name = 'all-MiniLM-L6-v2' # Fast, lightweight, highly effective
+
+        # ── 1. LOAD MODEL ─────────────────────────────────────────
+        model_name = 'all-MiniLM-L6-v2'
         self.stdout.write(f"Loading embedding model: {model_name}...")
         model = SentenceTransformer(model_name)
         vector_dimension = model.get_sentence_embedding_dimension()
+        self.stdout.write(f"Vector dimension: {vector_dimension}")
 
+        # ── 2. FETCH TICKETS (single query, no N+1) ───────────────
         tickets = Ticket.objects.all()
         if not tickets.exists():
-            self.stdout.write(self.style.ERROR("No tickets found. Run Phase 2 data load first."))
+            self.stdout.write(self.style.ERROR(
+                "No tickets found. Run load_tickets first."))
             return
 
-        texts_to_embed = []
-        ticket_ids = []
+        # Build a map once — avoids 650 individual DB queries later
+        ticket_map = {t.ticket_id: t for t in tickets}
+        ticket_ids = list(ticket_map.keys())
 
-        self.stdout.write("Preparing ticket text data...")
-        for ticket in tickets:
-            # We embed what a user would type when reporting a NEW ticket
-            text = f"{ticket.description} {ticket.symptoms}".strip()
-            texts_to_embed.append(text)
-            ticket_ids.append(ticket.ticket_id)
+        # ── 3. PREPARE TEXT ───────────────────────────────────────
+        # Use same fields as classification: title + description + symptoms
+        # This ensures semantic search finds tickets based on the same
+        # textual content the classifier uses
+        self.stdout.write("Preparing ticket texts...")
+        texts = []
+        for tid in ticket_ids:
+            t = ticket_map[tid]
+            text = (
+                f"{t.title or ''} "
+                f"{t.description or ''} "
+                f"{t.symptoms or ''}"
+            ).strip()
+            texts.append(text)
 
-        self.stdout.write(f"Encoding {len(texts_to_embed)} tickets into vectors (this may take a minute)...")
-        # Generate embeddings as a numpy array
-        embeddings = model.encode(texts_to_embed, convert_to_numpy=True)
+        # ── 4. GENERATE EMBEDDINGS ────────────────────────────────
+        self.stdout.write(
+            f"Encoding {len(texts)} tickets (this may take 1-2 minutes)...")
+        embeddings = model.encode(
+            texts,
+            convert_to_numpy=True,
+            show_progress_bar=True    # progress bar during encoding
+        )
 
-        self.stdout.write("Saving embeddings to PostgreSQL database...")
-        # Clear old embeddings to prevent duplicates on rerun
-        Embedding.objects.all().delete()
-        
+        # ── 5. NORMALISE FOR COSINE SIMILARITY ────────────────────
+        # sentence-transformers embeddings work best with cosine similarity.
+        # Normalising L2 vectors + IndexFlatIP gives cosine similarity,
+        # which produces better semantic search than raw L2 distance.
+        faiss.normalize_L2(embeddings)
+
+        # ── 6. SAVE EMBEDDINGS TO DATABASE ───────────────────────
+        self.stdout.write("Saving embeddings to PostgreSQL...")
+        Embedding.objects.all().delete()   # clear old to avoid duplicates
+
         embedding_objects = []
         for i, ticket_id in enumerate(ticket_ids):
-            ticket = Ticket.objects.get(ticket_id=ticket_id)
-            vector_bytes = embeddings[i].tobytes()
-            embedding_objects.append(
-                Embedding(
-                    ticket=ticket,
-                    embedding=vector_bytes,
-                    model_used=model_name,
-                    vector_dimension=vector_dimension
-                )
-            )
+            embedding_objects.append(Embedding(
+                ticket=ticket_map[ticket_id],
+                embedding=embeddings[i].tobytes(),
+                model_used=model_name,
+                vector_dimension=vector_dimension
+            ))
         Embedding.objects.bulk_create(embedding_objects)
+        self.stdout.write(f"Saved {len(embedding_objects)} embeddings.")
 
-        self.stdout.write("Building FAISS vector index...")
-        # L2 distance (Euclidean) is standard for these embeddings
-        faiss_index = faiss.IndexFlatL2(vector_dimension)
+        # ── 7. BUILD FAISS INDEX ──────────────────────────────────
+        # IndexFlatIP = inner product on normalised vectors = cosine similarity
+        # Score range: 0.0 (no similarity) to 1.0 (identical)
+        self.stdout.write("Building FAISS index (cosine similarity)...")
+        faiss_index = faiss.IndexFlatIP(vector_dimension)
         faiss_index.add(embeddings)
+        self.stdout.write(f"FAISS index contains {faiss_index.ntotal} vectors.")
 
-        # Save the FAISS index and the ID mapping to disk
+        # ── 8. SAVE INDEX AND MAPPING ─────────────────────────────
         models_dir = os.path.join(settings.BASE_DIR, 'ml_models')
         os.makedirs(models_dir, exist_ok=True)
-        
-        faiss.write_index(faiss_index, os.path.join(models_dir, 'ticket_vectors.faiss'))
-        joblib.dump(ticket_ids, os.path.join(models_dir, 'faiss_ticket_mapping.pkl'))
 
-        self.stdout.write(self.style.SUCCESS('✅ Successfully generated embeddings and built FAISS index!'))
+        faiss.write_index(
+            faiss_index,
+            os.path.join(models_dir, 'ticket_vectors.faiss'))
+        joblib.dump(
+            ticket_ids,
+            os.path.join(models_dir, 'faiss_ticket_mapping.pkl'))
+
+        self.stdout.write(self.style.SUCCESS(
+            f'✅ Done. Embeddings saved to DB and FAISS index saved to {models_dir}'))

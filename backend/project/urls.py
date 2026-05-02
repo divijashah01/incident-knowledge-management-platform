@@ -24,4 +24,5 @@ urlpatterns = [
     path('embeddings/', include('embeddings.urls')),
     path('clustering/', include('clustering.urls')),
     path('knowledge/', include('knowledge.urls')),
+    path('api/chat/', include('chat.urls')),
 ]

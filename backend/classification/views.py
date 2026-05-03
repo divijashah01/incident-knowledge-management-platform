@@ -8,19 +8,16 @@ from rest_framework.response import Response
 from rest_framework import status
 from scipy.sparse import hstack, csr_matrix
 
-# ── LAZY MODEL LOADING ────────────────────────────────────────────
-# Models are loaded once on first request and reused for all
-# subsequent requests — never loaded inside the request handler
-_classifier  = None
-_tfidf       = None
-_meta_cols   = None
+# ── LAZY LOADING ──────────────────────────────────────────────────
+_classifier = None
+_tfidf      = None
+_meta_cols  = None
 
 
 def _load_models():
-    """Load all three artifacts from disk. Called once on first request."""
     global _classifier, _tfidf, _meta_cols
     if _classifier is not None:
-        return True                          # already loaded
+        return True
 
     models_dir = os.path.join(settings.BASE_DIR, 'ml_models')
     clf_path   = os.path.join(models_dir, 'ticket_classifier.pkl')
@@ -36,43 +33,68 @@ def _load_models():
     return True
 
 
+def _get_top_keywords(text, predicted_class, top_n=6):
+    """
+    Feature 1: Explainability
+    Extracts top TF-IDF tokens that most influenced the predicted class
+    using the LogisticRegression model's learned coefficients.
+    Returns list of {word, influence} dicts sorted by influence score.
+    """
+    try:
+        classes     = list(_classifier.classes_)
+        class_index = classes.index(predicted_class)
+
+        tfidf_vector  = _tfidf.transform([text])
+        feature_names = np.array(_tfidf.get_feature_names_out())
+        class_coefs   = _classifier.coef_[class_index]
+
+        # influence = tfidf_weight × model_coefficient
+        tfidf_array = tfidf_vector.toarray()[0]
+        influence   = tfidf_array * class_coefs
+
+        top_indices = np.argsort(influence)[::-1][:top_n]
+
+        keywords = []
+        for idx in top_indices:
+            score = float(influence[idx])
+            if score > 0:
+                keywords.append({
+                    "word":      feature_names[idx],
+                    "influence": round(score, 4)
+                })
+        return keywords
+
+    except Exception:
+        return []
+
+
 class ClassifyTicketView(APIView):
     """
     POST /api/classification/classify/
 
-    Body (JSON):
-        title        : str  (optional but recommended)
-        description  : str
-        symptoms     : str  (optional)
-        impact       : str  (optional)
-        domain       : str  e.g. "Application / Backend Issues"
-        priority     : str  e.g. "P1"
-        severity     : str  e.g. "Critical"
-        environment  : str  e.g. "Production"
+    Body:
+        title, description, symptoms, impact   (text)
+        domain, priority, severity, environment (metadata)
 
-    Returns:
-        predicted_category : str
-        confidence_score   : float  (0.0 – 1.0)
-        all_probabilities  : dict   {class: probability}
+    Response:
+        predicted_category, confidence_score,
+        all_probabilities, top_keywords (Feature 1)
     """
 
     def post(self, request):
-
-        # ── Load models (first request only) ──────────────────────
         if not _load_models():
             return Response(
                 {"error": "Model not trained yet. Run: python manage.py train_classifier"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        # ── Extract inputs ─────────────────────────────────────────
-        title       = request.data.get('title', '')
+        title       = request.data.get('title',       '')
         description = request.data.get('description', '')
-        symptoms    = request.data.get('symptoms', '')
-        impact      = request.data.get('impact', '')
-        domain      = request.data.get('domain', '')
-        priority    = request.data.get('priority', '')
-        severity    = request.data.get('severity', '')
+        symptoms    = request.data.get('symptoms',    '')
+        impact      = request.data.get('impact',      '')
+        domain      = request.data.get('domain',      '')
+        priority    = request.data.get('priority',    '')
+        severity    = request.data.get('severity',    '')
         environment = request.data.get('environment', '')
 
         text = f"{title} {description} {symptoms} {impact}".strip()
@@ -83,45 +105,29 @@ class ClassifyTicketView(APIView):
             )
 
         try:
-            # ── Build text features ───────────────────────────────
-            X_tfidf = _tfidf.transform([text])
-
-            # ── Build metadata features ───────────────────────────
-            # Create a one-row DataFrame with the same columns used
-            # during training, then one-hot encode to match training shape
-            meta_raw = pd.DataFrame([{
-                'domain':      domain,
-                'priority':    priority,
-                'severity':    severity,
-                'environment': environment
+            X_tfidf    = _tfidf.transform([text])
+            meta_raw   = pd.DataFrame([{
+                'domain': domain, 'priority': priority,
+                'severity': severity, 'environment': environment
             }])
-            meta_encoded = pd.get_dummies(meta_raw, drop_first=True)
+            meta_enc     = pd.get_dummies(meta_raw, drop_first=True)
+            meta_aligned = meta_enc.reindex(columns=_meta_cols, fill_value=0)
 
-            # Align columns to match exactly what training produced
-            # Any unseen category gets a zero column; missing cols are added as 0
-            meta_aligned = meta_encoded.reindex(
-                columns=_meta_cols, fill_value=0)
-
-            # ── Combine and predict ───────────────────────────────
-            X_combined   = hstack([X_tfidf, csr_matrix(meta_aligned.values)])
-            prediction   = _classifier.predict(X_combined)[0]
+            X_combined    = hstack([X_tfidf, csr_matrix(meta_aligned.values)])
+            prediction    = _classifier.predict(X_combined)[0]
             probabilities = _classifier.predict_proba(X_combined)[0]
-            classes      = _classifier.classes_
+            classes       = _classifier.classes_
 
             confidence   = round(float(max(probabilities)), 4)
-            all_probs    = {
-                cls: round(float(prob), 4)
-                for cls, prob in zip(classes, probabilities)
-            }
+            all_probs    = {cls: round(float(p), 4) for cls, p in zip(classes, probabilities)}
+            top_keywords = _get_top_keywords(text, prediction, top_n=6)
 
             return Response({
                 "predicted_category": prediction,
                 "confidence_score":   confidence,
-                "all_probabilities":  all_probs
+                "all_probabilities":  all_probs,
+                "top_keywords":       top_keywords,
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

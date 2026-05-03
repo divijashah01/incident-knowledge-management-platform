@@ -6,175 +6,150 @@ from tickets.models import Cluster, Runbook
 
 
 class Command(BaseCommand):
-    help = 'Generates LLM runbooks for clusters. Skips clusters that already have one. Safe to rerun.'
+    help = 'Generates LLM runbooks with versioning. Never overwrites approved runbooks. Safe to rerun.'
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--force',
-            action='store_true',
+            '--force', action='store_true',
             help='Delete all unapproved runbooks and regenerate from scratch'
+        )
+        parser.add_argument(
+            '--cluster', type=int, default=None,
+            help='Regenerate runbook for a specific cluster ID only'
         )
 
     def handle(self, *args, **kwargs):
-        force = kwargs.get('force', False)
+        force      = kwargs.get('force', False)
+        cluster_id = kwargs.get('cluster', None)
 
-        # ── API KEY ───────────────────────────────────────────────
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            self.stdout.write(self.style.ERROR(
-                "GEMINI_API_KEY not set in environment."))
+            self.stdout.write(self.style.ERROR("GEMINI_API_KEY not set."))
             return
 
         client = genai.Client(api_key=api_key)
 
-        # ── OPTIONAL FORCE RESET ──────────────────────────────────
         if force:
             deleted = Runbook.objects.filter(approved=False).delete()
             self.stdout.write(self.style.WARNING(
                 f"Force mode: deleted {deleted[0]} unapproved runbooks."))
 
-        # ── FETCH CLUSTERS ────────────────────────────────────────
-        clusters = Cluster.objects.prefetch_related(
-            'ticket_clusters__ticket').all()
+        qs = Cluster.objects.prefetch_related('ticket_clusters__ticket').all()
+        if cluster_id:
+            qs = qs.filter(id=cluster_id)
+            if not qs.exists():
+                self.stdout.write(self.style.ERROR(f"Cluster {cluster_id} not found."))
+                return
 
-        if not clusters.exists():
-            self.stdout.write(self.style.ERROR(
-                "No clusters found. Run run_clustering first."))
+        if not qs.exists():
+            self.stdout.write(self.style.ERROR("No clusters found."))
             return
 
-        total      = clusters.count()
-        skipped    = 0
-        generated  = 0
-        failed     = 0
-
+        total     = qs.count()
+        generated = versioned = skipped = failed = 0
         self.stdout.write(f"Found {total} clusters.\n")
 
-        for cluster in clusters:
+        for cluster in qs:
 
-            # ── SKIP IF ALREADY HAS A RUNBOOK ─────────────────────
-            # This is the key fix: if a runbook already exists for this
-            # cluster, skip it entirely. This makes the command safe to
-            # rerun after partial failures without re-generating everything.
-            if Runbook.objects.filter(cluster=cluster).exists():
-                self.stdout.write(
-                    f"Cluster {cluster.id}: already has runbook — skipping.")
+            # ── Versioning logic ───────────────────────────────────
+            # Approved runbook exists → skip (never touch approved content)
+            # Unapproved exists → create new version (keep old for diff)
+            # None exists → create v1
+            if Runbook.objects.filter(cluster=cluster, approved=True).exists():
+                self.stdout.write(f"Cluster {cluster.id}: approved runbook exists — skipping.")
                 skipped += 1
                 continue
+
+            latest = (
+                Runbook.objects.filter(cluster=cluster)
+                .order_by('-version').values('version').first()
+            )
+            next_version = (latest['version'] + 1) if latest else 1
+            is_new       = next_version == 1
 
             tickets = [tc.ticket for tc in cluster.ticket_clusters.all()][:10]
             if not tickets:
-                self.stdout.write(
-                    f"Cluster {cluster.id}: no tickets — skipping.")
                 skipped += 1
                 continue
 
-            self.stdout.write(
-                f"Generating runbook for Cluster {cluster.id} "
-                f"({len(tickets)} tickets)...")
+            label = "Generating" if is_new else f"Re-generating v{next_version}"
+            self.stdout.write(f"Cluster {cluster.id}: {label}...")
 
-            # ── BUILD CONTEXT ─────────────────────────────────────
-            context_lines = []
-            for t in tickets:
-                context_lines.append(
-                    f"- Title: {t.title}\n"
-                    f"  Symptoms: {t.symptoms}\n"
-                    f"  Root Cause: {t.root_cause}\n"
-                    f"  Resolution: {t.resolution_steps}"
-                )
-            context_text = "\n\n".join(context_lines)
+            context_text = "\n\n".join(
+                f"- Title: {t.title}\n  Symptoms: {t.symptoms}\n"
+                f"  Root Cause: {t.root_cause}\n  Resolution: {t.resolution_steps}"
+                for t in tickets
+            )
 
             prompt = f"""You are an Expert Site Reliability Engineer (SRE).
-I will provide you with a list of historical IT support tickets grouped into a cluster by a machine learning algorithm. They represent a recurring systemic issue.
+Historical IT support tickets grouped by a clustering algorithm:
 
-Tickets:
 {context_text}
 
 Based ONLY on the provided tickets, generate a structured Runbook in clean Markdown.
 
-Include these sections exactly:
-1. Short, Descriptive Title (do not include the word "Runbook" in the title)
+Include:
+1. Short, Descriptive Title (no "Runbook" in title)
 2. Systemic Root Cause Summary
 3. Diagnostic Steps
 4. Step-by-Step Resolution Workflow
 5. Preventative Measures"""
 
-            # ── RETRY LOOP ────────────────────────────────────────
-            # Uses exponential backoff: 20s, 40s, 80s, 160s
-            # Longer initial wait than before to respect free tier limits
-            max_retries    = 4
-            success        = False
+            success = this_failed = False
             runbook_content = None
 
-            for attempt in range(max_retries):
+            for attempt in range(4):
                 try:
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=prompt,
-                    )
+                        model='gemini-2.5-flash', contents=prompt)
                     runbook_content = response.text
                     success = True
                     break
-
                 except Exception as e:
-                    error_str = str(e)
-                    is_rate_limit = any(
-                        code in error_str for code in ['429', '503', 'RESOURCE_EXHAUSTED'])
-
-                    if is_rate_limit and attempt < max_retries - 1:
-                        sleep_time = 20 * (2 ** attempt)   # 20, 40, 80, 160
-                        self.stdout.write(self.style.WARNING(
-                            f"  Rate limited. Waiting {sleep_time}s "
-                            f"(attempt {attempt + 1}/{max_retries})..."))
-                        time.sleep(sleep_time)
-                    elif is_rate_limit:
-                        self.stdout.write(self.style.ERROR(
-                            f"  Cluster {cluster.id}: FAILED after "
-                            f"{max_retries} attempts. Will be picked up on next run."))
-                        failed += 1
+                    err = str(e)
+                    if any(c in err for c in ['429', '503', 'RESOURCE_EXHAUSTED']):
+                        if attempt < 3:
+                            wait = 20 * (2 ** attempt)
+                            self.stdout.write(self.style.WARNING(f"  Waiting {wait}s..."))
+                            time.sleep(wait)
+                        else:
+                            self.stdout.write(self.style.ERROR(f"  Failed after 4 attempts."))
+                            this_failed = True; break
                     else:
-                        self.stdout.write(self.style.ERROR(
-                            f"  Cluster {cluster.id}: Unhandled error — {e}"))
-                        failed += 1
-                        break
+                        self.stdout.write(self.style.ERROR(f"  Error: {e}"))
+                        this_failed = True; break
 
-            # ── SAVE IF SUCCESSFUL ────────────────────────────────
+            if this_failed:
+                failed += 1
+                continue
+
             if success and runbook_content:
-                # Extract title from first non-empty line
                 lines = [l.strip() for l in runbook_content.split('\n') if l.strip()]
-                generated_title = lines[0].lstrip('#').lstrip('*').strip() if lines else ''
-                if not generated_title or len(generated_title) > 250:
-                    generated_title = f"Runbook for Cluster {cluster.id}"
+                title = lines[0].lstrip('#*').strip() if lines else f"Runbook for Cluster {cluster.id}"
+                if len(title) > 250:
+                    title = f"Runbook for Cluster {cluster.id}"
 
                 Runbook.objects.create(
-                    cluster=cluster,
-                    version=1,
-                    title=generated_title,
-                    content=runbook_content,
-                    created_by="Gemini",
-                    approved=False
+                    cluster=cluster, version=next_version,
+                    title=title, content=runbook_content,
+                    created_by="Gemini", approved=False
                 )
-
-                # Update cluster label with the LLM-generated title
-                cluster.label = generated_title
-                cluster.save()
+                if is_new:
+                    cluster.label = title
+                    cluster.save()
+                    generated += 1
+                else:
+                    versioned += 1
 
                 self.stdout.write(self.style.SUCCESS(
-                    f"  ✅ Cluster {cluster.id}: saved — '{generated_title[:60]}'"))
-                generated += 1
+                    f"  ✅ Cluster {cluster.id} v{next_version}: '{title[:60]}'"))
 
-            # ── RATE LIMIT DELAY ──────────────────────────────────
-            # Gemini free tier: 15 requests/minute max
-            # 60s / 15 = 4s minimum. We use 18s to stay well within limits.
-            # Only sleep after a successful call — failed calls already
-            # waited during retries
             if success:
                 time.sleep(18)
 
-        # ── FINAL SUMMARY ─────────────────────────────────────────
         self.stdout.write(self.style.SUCCESS(
-            f'\n🎉 Done. Generated: {generated} | Skipped: {skipped} | Failed: {failed}'))
-
+            f'\n🎉 New: {generated} | Versioned: {versioned} | '
+            f'Skipped: {skipped} | Failed: {failed}'))
         if failed > 0:
             self.stdout.write(self.style.WARNING(
-                f"Re-run the command to retry {failed} failed cluster(s). "
-                f"Already-generated runbooks will be skipped automatically."))
+                f"Rerun to retry {failed} failed. Use --cluster <id> for specific cluster."))

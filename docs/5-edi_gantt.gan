@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?><project name="edi" company="" webLink="http://" view-date="2026-01-25" view-index="2" gantt-divider-location="351" resource-divider-location="300" version="3.3.3316" locale="en_IN">
+    <description/>
+    <view zooming-state="default:7" id="gantt-chart">
+        <field id="tpd15" name="Notes" width="20" order="-1"/>
+        <field id="tpd3" name="Name" width="200" order="0"/>
+        <field id="tpd4" name="Begin date" width="75" order="1"/>
+        <field id="tpd5" name="End date" width="75" order="2"/>
+        <option id="filter.completedTasks" value="false"/>
+        <option id="filter.dueTodayTasks" value="false"/>
+        <option id="filter.overdueTasks" value="false"/>
+        <option id="filter.inProgressTodayTasks" value="false"/>
+    </view>
+    <view id="resource-table">
+        <field id="0" name="Name" width="210" order="0"/>
+        <field id="1" name="Default role" width="86" order="1"/>
+    </view>
+    <!-- -->
+    <calendars base-id="none">
+        <day-types>
+            <day-type id="0"/>
+            <day-type id="1"/>
+            <default-week id="1" name="default" sun="0" mon="0" tue="0" wed="0" thu="0" fri="0" sat="0"/>
+            <only-show-weekends value="true"/>
+            <overriden-day-types/>
+            <days/>
+        </day-types>
+        <date year="2026" month="3" date="1" type="WORKING_DAY" color="#808080"/>
+    </calendars>
+    <tasks empty-milestones="true">
+        <taskproperties>
+            <taskproperty id="tpd0" name="type" type="default" valuetype="icon"/>
+            <taskproperty id="tpd1" name="priority" type="default" valuetype="icon"/>
+            <taskproperty id="tpd2" name="info" type="default" valuetype="icon"/>
+            <taskproperty id="tpd3" name="name" type="default" valuetype="text"/>
+            <taskproperty id="tpd4" name="begindate" type="default" valuetype="date"/>
+            <taskproperty id="tpd5" name="enddate" type="default" valuetype="date"/>
+            <taskproperty id="tpd6" name="duration" type="default" valuetype="int"/>
+            <taskproperty id="tpd7" name="completion" type="default" valuetype="int"/>
+            <taskproperty id="tpd8" name="coordinator" type="default" valuetype="text"/>
+            <taskproperty id="tpd9" name="predecessorsr" type="default" valuetype="text"/>
+        </taskproperties>
+        <task id="0" uid="aac2e57284ef43ca89630e70041e2bb6" name="Requirement analysis" meeting="false" start="2026-02-01" duration="7" complete="0" thirdDate="2026-02-01" thirdDate-constraint="1" expand="true">
+            <depend id="1" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="1" uid="a1c986f1cc8149a3b7d327edb85f6e87" name="Design" meeting="false" start="2026-02-08" duration="11" complete="0" thirdDate="2026-02-05" thirdDate-constraint="1" expand="true">
+            <depend id="2" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="2" uid="f6b2fe4936e544a7b765fec24cbc9474" name="Data Ingestion" meeting="false" start="2026-02-19" duration="10" complete="0" thirdDate="2026-02-12" thirdDate-constraint="1" expand="true">
+            <depend id="3" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="3" uid="91b20490d1b24e68a5863f2ea244519d" name="ML  and AI" meeting="false" start="2026-03-01" duration="22" complete="0" thirdDate="2026-02-18" thirdDate-constraint="1" expand="true">
+            <depend id="4" type="2" difference="0" hardness="Strong"/>
+            <depend id="5" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="4" uid="924928f1920943b8b16c21743e2f2588" name="Backend" meeting="false" start="2026-03-23" duration="25" complete="0" thirdDate="2026-03-22" thirdDate-constraint="1" expand="true"/>
+        <task id="5" uid="5ddbc8c585f3497c8148fa281a0402c4" name="Frontend" meeting="false" start="2026-03-23" duration="22" complete="0" thirdDate="2026-03-22" thirdDate-constraint="1" expand="true">
+            <depend id="6" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="6" uid="82505076d38a4fea837678f0a5d1623b" name="Integration" meeting="false" start="2026-04-14" duration="7" complete="0" thirdDate="2026-04-13" thirdDate-constraint="1" expand="true">
+            <depend id="7" type="2" difference="0" hardness="Strong"/>
+            <depend id="9" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="7" uid="11485011c4e9409c8887ee4619fa5df0" name="testing" meeting="false" start="2026-04-21" duration="6" complete="0" thirdDate="2026-04-21" thirdDate-constraint="1" expand="true">
+            <depend id="8" type="2" difference="0" hardness="Strong"/>
+        </task>
+        <task id="8" uid="d0664add17844596a448f254e849ccdc" name="deployement" meeting="false" start="2026-04-27" duration="3" complete="0" thirdDate="2026-04-26" thirdDate-constraint="1" expand="true"/>
+        <task id="9" uid="7f67c08ff23b4071bd9aa3552468114f" name="Documentation" meeting="false" start="2026-04-24" duration="8" complete="0" thirdDate="2026-04-24" thirdDate-constraint="1" expand="true"/>
+    </tasks>
+    <resources/>
+    <allocations/>
+    <vacations/>
+    <previous/>
+    <roles roleset-name="Default"/>
+</project>

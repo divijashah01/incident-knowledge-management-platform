@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getClusters } from '../services/api';
-import LoadingSpinner from '../components/common/LoadingSpinner';
+import { getClusters } from '../../services/api';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 
 export default function Clusters() {
   const [clusters, setClusters] = useState([]);

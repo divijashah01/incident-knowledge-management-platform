@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 
 
 class Ticket(models.Model):
@@ -14,11 +15,11 @@ class Ticket(models.Model):
     domain                = models.CharField(max_length=100, db_index=True)
     priority              = models.CharField(max_length=5, choices=PRIORITY_CHOICES)
     severity              = models.CharField(max_length=20, choices=SEVERITY_CHOICES)
-    status                = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    status                = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True, default='In Progress')
 
     # Timestamps
-    created_at            = models.DateTimeField(db_index=True)
-    resolved_at           = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     # Text fields
     description           = models.TextField()
@@ -44,6 +45,12 @@ class Ticket(models.Model):
 
     # Analytics
     resolution_time_minutes = models.IntegerField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.ticket_id:
+            # Generates IDs like INC-A1B2C3D4
+            self.ticket_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'tickets'

@@ -1,10 +1,10 @@
-<?xml version="1.0" encoding="UTF-8"?><project name="edi" company="" webLink="http://" view-date="2026-01-25" view-index="2" gantt-divider-location="351" resource-divider-location="300" version="3.3.3316" locale="en_IN">
+<?xml version="1.0" encoding="UTF-8"?><project name="edi" company="" webLink="http://" view-date="2026-02-08" view-index="0" gantt-divider-location="351" resource-divider-location="300" version="3.3.3316" locale="en_IN">
     <description/>
     <view zooming-state="default:7" id="gantt-chart">
-        <field id="tpd15" name="Notes" width="20" order="-1"/>
         <field id="tpd3" name="Name" width="200" order="0"/>
         <field id="tpd4" name="Begin date" width="75" order="1"/>
         <field id="tpd5" name="End date" width="75" order="2"/>
+        <field id="tpd15" name="Notes" width="20" order="3"/>
         <option id="filter.completedTasks" value="false"/>
         <option id="filter.dueTodayTasks" value="false"/>
         <option id="filter.overdueTasks" value="false"/>

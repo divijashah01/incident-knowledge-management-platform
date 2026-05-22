@@ -8,6 +8,13 @@ from tickets.models import Ticket, Embedding, Cluster, TicketCluster
 class Command(BaseCommand):
     help = 'Performs K-Means clustering on ticket embeddings and saves results to DB.'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            help='Run clustering and show results without saving'
+        )
+
     def handle(self, *args, **kwargs):
 
         # ── 1. FETCH RESOLVED/CLOSED TICKETS ─────────────────────
@@ -84,6 +91,12 @@ class Command(BaseCommand):
         for cid, cnt in sorted(zip(unique, counts),
                                key=lambda x: -x[1]):
             self.stdout.write(f"  Cluster {cid + 1}: {cnt} tickets")
+
+        if kwargs['dry_run']:
+            self.stdout.write(
+                self.style.SUCCESS("Dry run complete. No database changes made.")
+            )
+            return
 
         # ── 7. SAVE TO DATABASE ───────────────────────────────────
         self.stdout.write("Clearing old clusters and saving new ones...")

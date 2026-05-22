@@ -48,9 +48,12 @@ INSTALLED_APPS = [
     'knowledge',
     'chat',
     'analytics',
+    'accounts',
+    'corsheaders'
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -132,4 +135,25 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 CORS_ALLOWED_ORIGINS = ['http://localhost:5173']
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'origin',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# ── SESSION settings ──
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE   = False
+
+# ── CSRF settings ──
+CSRF_TRUSTED_ORIGINS    = ['http://localhost:5173']
+CSRF_COOKIE_SAMESITE    = 'Lax'
+CSRF_COOKIE_HTTPONLY    = False   # must be False so JS can read it
 
